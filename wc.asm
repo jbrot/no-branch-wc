@@ -1,26 +1,26 @@
 ;
-; This file is taken from https://cs.lmu.edu/~ray/notes/x86assembly/. I am only using this
-; to test out a Makefile. All rights belong to the original author. I will be rewriting this
-; in the next commit. The rewritten code will be licensed under the GPL with the rest of this
-; project.
+;    no-branch-wc: a wc clone with no branch instructions
+;    Copyright (C) 2020 Joshua Brot
+;
+;    This program is free software: you can redistribute it and/or modify
+;    it under the terms of the GNU General Public License as published by
+;    the Free Software Foundation, either version 3 of the License, or
+;    (at your option) any later version.
+;
+;    This program is distributed in the hope that it will be useful,
+;    but WITHOUT ANY WARRANTY; without even the implied warranty of
+;    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;    GNU General Public License for more details.
+;
+;    You should have received a copy of the GNU General Public License
+;    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ;
 
-; ----------------------------------------------------------------------------------------
-; This is an macOS console program that writes "Hola, mundo" on one line and then exits.
-; It uses puts from the C library.  To assemble and run:
-;
-;     nasm -fmacho64 hola.asm && gcc hola.o && ./a.out
-; ----------------------------------------------------------------------------------------
+global _main
 
-          global    _main
-          extern    _puts
+section .text
 
-          section   .text
-_main:    push      rbx                     ; Call stack must be aligned
-          lea       rdi, [rel message]      ; First argument is address of message
-          call      _puts                   ; puts(message)
-          pop       rbx                     ; Fix up stack before returning
-          ret
-
-          section   .data
-message:  db        "Hola, mundo", 0        ; C strings need a zero byte at the end
+_main:
+    mov rax, 0x2000001
+    mov rdi, 5
+    syscall
