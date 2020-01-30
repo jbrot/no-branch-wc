@@ -21,6 +21,19 @@ global _main
 section .text
 
 _main:
+    ; Arguments are passed via rdi, rsi, rdx, r10, r8, r9
+    ; user_ssize_t write(int fd, user_addr_t cbuf, user_size_t nbyte);
+    mov rax, 0x2000004
+    mov rdi, 0x01
+    mov rsi, $message
+    mov rdx, $message_len
+    syscall
+
     mov rax, 0x2000001
     mov rdi, 5
     syscall
+
+section .data
+
+message:      db   'Hello, world!',0x0A
+message_len:  equ  $-message
