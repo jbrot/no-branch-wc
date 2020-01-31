@@ -63,7 +63,7 @@ loop:
     mov rdx, 0x01
     syscall
 
-    ; Go to done rax is 0 or continue if eax is 1
+    ; Go to done if rax is 0 or continue if rax is 1
     ; That is, if we're at the end of the input we go to done, otherwise we go to continue
     ; This is an indirect branch, but I think this is about as good as we're going to get.
     mov r8, done
@@ -108,10 +108,12 @@ continue:
 
 done:
 
-    mov dil, 0x09
+    ; Print out the results
+
+    mov dil, 0x09 ; '\t'
     call print_char
 
-    ; print line count
+    ; Print line count
     xor rdi, rdi
     mov edi, [rbp - 10]
     call print_number
@@ -119,7 +121,7 @@ done:
     mov dil, 0x09
     call print_char
 
-    ; print word count
+    ; Print word count
     xor rdi, rdi
     mov edi, [rbp - 14]
     call print_number
@@ -127,17 +129,17 @@ done:
     mov dil, 0x09
     call print_char
 
-    ; print char count
+    ; Print char count
     xor rdi, rdi
     mov edi, [rbp - 6]
     call print_number
 
-    mov dil, 0x0a
+    mov dil, 0x0a ; '\n'
     call print_char
 
     ; exit(0)
     mov rax, 0x2000001
-    mov rdi, [rbp - 4]
+    xor rdi, rdi
     syscall
 
 ; Set al to 0 if dil is a space (0x20), form feed (0x0c), line feed (0x0a), carriage return (0x0d),
@@ -204,7 +206,7 @@ pn_loop:
     sub rsp, 0x01
     inc r11
 
-    ; Divide parameter by 10, store remainder at esp
+    ; Divide parameter by 10, store remainder at rsp
     mov rax, r9 ; rax: current value
     mov r8, 0x0A ; r8: 10
     div r8
