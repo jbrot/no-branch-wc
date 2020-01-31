@@ -36,6 +36,22 @@ _main:
     mov [rbp - 8], rax
     mov [rbp - 16], rax
 
+    ; The following code attempts to allow the program to edit itself. Unfortunately,
+    ; MacOS won't allow this to happen. I was able to use it to enable execution of
+    ; the stack, so maybe at a later date I will try to use that to truly avoid any
+    ; branching instructions.
+    ;
+    ; ; Arguments are passed via rdi, rsi, rdx, r10, r8, r9
+    ; ; int mprotect(caddr_t addr, size_t len, int prot);
+    ; mov rax, 0x200004A
+    ; lea rdi, [rel $ + 1]
+    ; mov rsi, 0x0FFF ; Round rdi down to nearest page
+    ; not rsi
+    ; and rdi, rsi
+    ; mov rsi, 0x1000
+    ; mov rdx, 0x07 ; PROT_READ 1 | PROT_WRITE 2 | PROT_EXEC 4
+    ; syscall
+
 loop:
     ; Read one char into rbp - 16
     ;
@@ -49,14 +65,12 @@ loop:
 
     ; Go to done rax is 0 or continue if eax is 1
     ; That is, if we're at the end of the input we go to done, otherwise we go to continue
+    ; This is an indirect branch, but I think this is about as good as we're going to get.
     mov r8, done
     mov r9, continue
     xor r9, r8
     mul r9
     xor rax, r8
-    ; TODO This is an indirect branch. We can eliminate it with self-modifying code.
-    ; However, memory protections will get in the way. I need to figure out how to
-    ; disable said protections.
     jmp rax
 
 continue:
@@ -202,9 +216,18 @@ pn_loop:
     mov r9, r10 ; Set current value (r9) to itself divided by 10 (r10)
 
     ; If we're at 0, we're done!
-    ; TODO: Avoid branching here using whatever solution we come up with above.
+    ; This uses the same `not-a-branch` branching strategy as above.
     cmp r9, 0x00
-    jne pn_loop
+    sete al
+    movzx rax, al
+    mov rdi, pn_loop
+    mov rsi, pn_done
+    xor rsi, rdi
+    mul rsi
+    xor rdi, rax
+    jmp rdi
+
+pn_done:
 
     ; Write out the buffer
     ; user_ssize_t write(int fd, user_addr_t cbuf, user_size_t nbyte);
