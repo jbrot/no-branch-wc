@@ -37,10 +37,16 @@ loop:
     mov rdx, 0x01
     syscall
 
-    ; Go to done if we've finished reading the input
-    ; TODO do this without using a branching command.
-    cmp rax, 0x00
-    je done
+    ; Go to done eax is 0 or continue if eax is 1
+    ; That is, if we're at the end of the input we go to done, otherwise we go to continue
+    mov r8, done
+    mov r9, continue
+    xor r9, r8
+    mul r9
+    xor rax, r8
+    jmp rax
+
+continue:
 
     ; Process the input. For now, just echo to stdout.
 
