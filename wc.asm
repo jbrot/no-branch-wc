@@ -21,19 +21,42 @@ global _main
 section .text
 
 _main:
+    ; Allocate 8 bytes on the stack.
+    push rbp ; Unclear if we really need to do this because we won't call ret
+    mov rbp, rsp
+    sub rsp, 0x08
+
+loop:
+    ; Read one char into rbp - 8
+    ;
     ; Arguments are passed via rdi, rsi, rdx, r10, r8, r9
+    ; user_ssize_t read(int fd, user_addr_t cbuf, user_size_t nbyte);
+    mov rax, 0x2000003
+    mov rdi, 0x00
+    lea rsi, [rbp - 8]
+    mov rdx, 0x01
+    syscall
+
+    ; Go to done if we've finished reading the input
+    ; TODO do this without using a branching command.
+    cmp rax, 0x00
+    je done
+
+    ; Process the input. For now, just echo to stdout.
+
     ; user_ssize_t write(int fd, user_addr_t cbuf, user_size_t nbyte);
     mov rax, 0x2000004
     mov rdi, 0x01
-    mov rsi, $message
-    mov rdx, $message_len
+    lea rsi, [rbp - 8]
+    mov rdx, 0x01
     syscall
 
+    ; Repeat
+    jmp loop
+
+done:
+
+    ; exit(0)
     mov rax, 0x2000001
-    mov rdi, 5
+    mov rdi, 0x00
     syscall
-
-section .data
-
-message:      db   'Hello, world!',0x0A
-message_len:  equ  $-message
