@@ -15,7 +15,7 @@ Creating a terminating loop without a branching statement turned out to be quite
 Originally, I sought to accomplish this with self-modifying code, but modern versions of macOS only let you write self-modifying code in the stack, which I decided was more effort than it was worth.
 As a stop-gap measure, I used indirect branches (i.e., jumping to an address in a register) which was not a very satisfying solution, but deemed "good enough" as at least there weren't any conditional branches.
 
-However, after discussing this proejct with my friend Tommy Cohn, he suggested that I could use interrupts to end the loops without branches.
+However, after discussing this project with my friend Tommy Cohn, he suggested that I could use interrupts to end the loops without branches.
 Since this program is meant to be run in userspace, I couldn't actually use a real hardware interrupt, but I was able to use the next best thing: POSIX signals.
 For each loop, the program sets the code to run after the loop ends as the signal handler for `SIGHUP`.
 Then, each cycle, the program invokes a syscall.
