@@ -21,36 +21,52 @@ global _main
 section .text
 
 _main:
-    ; Allocate 16 bytes on the stack.
+    ; Reserve space on the stack
+    ;
+    ; -48: pid
+    ; -40: struct __sigaction
+    ;      -40: union __sigaction_u
+    ;      -32: trampoline
+    ;      -24: sigset_t
+    ;      -20: sa_flags
     ; -16: char being read in
     ; -15: bool (in a word?)
     ; -14: word count
     ; -10: line count
     ; - 6: char count
+
     push rbp ; Unclear if we really need to do this because we won't call ret
     mov rbp, rsp
-    sub rsp, 0x10
+    sub rsp, 0x30
 
-    ; 0 the stack
+    ; Initialize the counts to 0, as wall as sigset_t and sa_flags
     xor rax, rax
     mov [rbp - 8], rax
     mov [rbp - 16], rax
+    mov [rbp - 24], rax
 
-    ; The following code attempts to allow the program to edit itself. Unfortunately,
-    ; MacOS won't allow this to happen. I was able to use it to enable execution of
-    ; the stack, so maybe at a later date I will try to use that to truly avoid any
-    ; branching instructions.
-    ;
-    ; ; Arguments are passed via rdi, rsi, rdx, r10, r8, r9
-    ; ; int mprotect(caddr_t addr, size_t len, int prot);
-    ; mov rax, 0x200004A
-    ; lea rdi, [rel $ + 1]
-    ; mov rsi, 0x0FFF ; Round rdi down to nearest page
-    ; not rsi
-    ; and rdi, rsi
-    ; mov rsi, 0x1000
-    ; mov rdx, 0x07 ; PROT_READ 1 | PROT_WRITE 2 | PROT_EXEC 4
-    ; syscall
+    ; Prepare struct __sigaction
+    mov rax, done
+    mov [rbp - 40], rax ; The handler
+    mov [rbp - 32], rax ; The trampoline
+    ; If we were trying to handle the interrupt in good faith, we would provide a
+    ; dedicated trampoline function to deal with gracefully entering and exiting
+    ; the interrupt handler. As it stands, we're just using the interrupt as a way
+    ; of exiting the loop without a branch statement, so we just set both to point
+    ; to `done`.
+
+    ; int sigaction(int signum, struct __sigaction *nsa, struct sigaction *osa); 
+    mov rax, 0x200002E
+    mov rdi, 0x01
+    lea rsi, [rbp - 40]
+    xor rdx, rdx
+    syscall
+
+    ; Save our pid for triggering the interrupt later
+    ; int getpid(void);
+    mov rax, 0x2000014
+    syscall
+    mov [rbp - 48], rax
 
 loop:
     ; Read one char into rbp - 16
@@ -63,17 +79,21 @@ loop:
     mov rdx, 0x01
     syscall
 
-    ; Go to done if rax is 0 or continue if rax is 1
-    ; That is, if we're at the end of the input we go to done, otherwise we go to continue
-    ; This is an indirect branch, but I think this is about as good as we're going to get.
-    mov r8, done
-    mov r9, continue
+    ; We replace rax with a syscall op based on its current value.
+    ; If rax is 1, we fill in a no op. Otherwise, we fill in kill.
+    ; Thus, when we are at the end of the stream, our syscall will trigger the interrupt
+    ; terminating the loop, otherwise it will do nothing, and we will continue processing
+    ; input.
+    mov r8, 0x2000025 ; kill
+    mov r9, 0x2000176 ; no-op
     xor r9, r8
     mul r9
     xor rax, r8
-    jmp rax
 
-continue:
+    ; int kill(int pid, int signum, int posix);
+    mov rdi, [rbp - 48]
+    mov rsi, 0x01
+    syscall
 
     ; Process the input.
 
