@@ -23,12 +23,6 @@ section .text
 _main:
     ; Reserve space on the stack
     ;
-    ; -48: pid
-    ; -40: struct __sigaction
-    ;      -40: union __sigaction_u
-    ;      -32: trampoline
-    ;      -24: sigset_t
-    ;      -20: sa_flags
     ; -16: char being read in
     ; -15: bool (in a word?)
     ; -14: word count
@@ -37,36 +31,16 @@ _main:
 
     push rbp ; Unclear if we really need to do this because we won't call ret
     mov rbp, rsp
-    sub rsp, 0x30
+    sub rsp, 0x10
 
-    ; Initialize the counts to 0, as wall as sigset_t and sa_flags
+    ; Initialize the counts to 0
     xor rax, rax
     mov [rbp - 8], rax
     mov [rbp - 16], rax
-    mov [rbp - 24], rax
 
-    ; Prepare struct __sigaction
-    mov rax, done
-    mov [rbp - 40], rax ; The handler
-    mov [rbp - 32], rax ; The trampoline
-    ; If we were trying to handle the interrupt in good faith, we would provide a
-    ; dedicated trampoline function to deal with gracefully entering and exiting
-    ; the interrupt handler. As it stands, we're just using the interrupt as a way
-    ; of exiting the loop without a branch statement, so we just set both to point
-    ; to `done`.
-
-    ; int sigaction(int signum, struct __sigaction *nsa, struct sigaction *osa); 
-    mov rax, 0x200002E
-    mov rdi, 0x01
-    lea rsi, [rbp - 40]
-    xor rdx, rdx
-    syscall
-
-    ; Save our pid for triggering the interrupt later
-    ; int getpid(void);
-    mov rax, 0x2000014
-    syscall
-    mov [rbp - 48], rax
+    ; Set up interrupt handler
+    mov rdi, done
+    call prepare_interrupt
 
 loop:
     ; Read one char into rbp - 16
@@ -79,21 +53,13 @@ loop:
     mov rdx, 0x01
     syscall
 
-    ; We replace rax with a syscall op based on its current value.
-    ; If rax is 1, we fill in a no op. Otherwise, we fill in kill.
-    ; Thus, when we are at the end of the stream, our syscall will trigger the interrupt
-    ; terminating the loop, otherwise it will do nothing, and we will continue processing
-    ; input.
-    mov r8, 0x2000025 ; kill
-    mov r9, 0x2000176 ; no-op
-    xor r9, r8
-    mul r9
-    xor rax, r8
-
-    ; int kill(int pid, int signum, int posix);
-    mov rdi, [rbp - 48]
-    mov rsi, 0x01
-    syscall
+    ; If rax is zero (end of stream), we use the interrup to jump to done
+    ; without a branch statement. Sure, this is just using branch statements
+    ; in the kernel instead of here, but similar behavior could be achieved
+    ; with hardware interrupts if we /were/ the kernel: which is why I consider
+    ; this to be a legitimate tactic to avoid branch statements
+    mov rdi, rax
+    call interrupt_on_zero
 
     ; Process the input.
 
@@ -216,38 +182,39 @@ print_number:
     push rbp
     mov rbp, rsp
 
-    ; r9: current value
-    ; r11: length
-    mov r9, rdi
+    ; rbp - 8:  number
+    ; rbp - 16: length
+    sub rsp, 0x10
+    mov [rbp - 8], rdi
     xor r11, r11
+    mov [rbp - 16], r11
+
+    push rdi
+    mov rdi, pn_done
+    call prepare_interrupt
+    pop rdi
 
 pn_loop:
     ; Increase length, reserve space for next character
     sub rsp, 0x01
-    inc r11
+    inc qword [rbp - 16]
 
     ; Divide parameter by 10, store remainder at rsp
-    mov rax, r9 ; rax: current value
+    mov rax, [rbp - 8] ; rax: current value
+    xor rdx, rdx
     mov r8, 0x0A ; r8: 10
-    div r8
-    mov r10, rax ; r10: current value divided by 10
-    mul r8
-    sub r9, rax ; r9: modulus
-    add r9, '0'
-    mov byte [rsp], r9b ; store modulus as ascii character in buffer
-    mov r9, r10 ; Set current value (r9) to itself divided by 10 (r10)
+    div r8 ; rax: current value divided by 10, rdx: remainder
+    add rdx, '0'
+    mov byte [rsp], dl ; store modulus as ascii character in buffer
+    mov [rbp - 8], rax; Update current value to itself divided by 10 (rax)
 
     ; If we're at 0, we're done!
-    ; This uses the same `not-a-branch` branching strategy as above.
-    cmp r9, 0x00
-    sete al
-    movzx rax, al
-    mov rdi, pn_loop
-    mov rsi, pn_done
-    xor rsi, rdi
-    mul rsi
-    xor rdi, rax
-    jmp rdi
+    ; This uses the same interrupt strategy as above
+    cmp rax, 0x00
+    setne dil
+    movzx rdi, dil
+    call interrupt_on_zero
+    jmp pn_loop
 
 pn_done:
 
@@ -255,11 +222,81 @@ pn_done:
     ; user_ssize_t write(int fd, user_addr_t cbuf, user_size_t nbyte);
     mov rax, 0x2000004
     mov rdi, 0x01
-    lea rsi, [rsp]
-    mov rdx, r11
+    lea rsi, [rbp - 16]
+    mov rdx, [rbp - 16]
+    sub rsi, rdx
     syscall
 
     ; Restore stack frame, and return.
     mov rsp, rbp
     pop rbp
+    ret
+
+; Cause execution to jump to the address in rdi when SIGHUP is received
+; Note that after this jump, rsp will be messed up, but rbp will be unchanged.
+; Thus, you can use this within a function to break from a loop: the standard
+; epilog will properly restore the stack.
+prepare_interrupt:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x18
+    and spl, 0xF0 ; 16-byte align the stack
+
+    ; Prepare struct __sigaction
+    mov [rbp - 24], rdi ; The handler
+    mov [rbp - 16], rdi ; The trampoline
+    ; If we were trying to handle the interrupt in good faith, we would provide a
+    ; dedicated trampoline function to deal with gracefully entering and exiting
+    ; the interrupt handler. As it stands, we're just using the interrupt as a way
+    ; of exiting the loop without a branch statement, so we just set both to point
+    ; to `done`.
+    mov dword [rbp - 8], 0x0000 ; sigset_t
+    mov dword [rbp - 4], 0x0010 ; sa_flags (SA_NODEFER)
+    ; We need to set SA_NODEFER because we don't properly exit the interrupt handler.
+    ; That's what the trampoline is supposed to do. However, by setting NODEFER, we
+    ; can receive a given interrupt even while in its interrupt handler: allowing us
+    ; to effectively ignore the fact that the OS thinks we're still in the interrupt
+    ; handling code. In general, this is not a good idea---but this project is not
+    ; to create good code, it's to create working code without branches.
+
+    ; int sigaction(int signum, struct __sigaction *nsa, struct sigaction *osa);
+    mov rax, 0x200002E
+    mov rdi, 0x01
+    lea rsi, [rbp - 24]
+    xor rdx, rdx
+    syscall
+
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; Raise SIGHUP if rdi is 0. Perform a no op otherwise
+interrupt_on_zero:
+    ; We don't have locals here, so we don't need to adjust ebp. In fact, it's crucial
+    ; that we don't adjust ebp as, in the event, that we wind up in the interrupt handler,
+    ; ret will never be called here, and likewise ret will never be called for the jump
+    ; into the handler itself: leaving two pointers pushed on top of the stack. However,
+    ; as long as the calling function references everything in terms of ebp, it can ignore
+    ; these two extraneous pointers, and they will be properly released in the function epilog.
+
+    ; int getpid(void);
+    mov rax, 0x2000014
+    syscall
+    mov rsi, rax
+
+    ; We set rax with a syscall op based on the low bit of rdi.
+    ; If it is 1, we fill in a no op. If it is 0, we fill in kill.
+    mov r8, 0x2000025 ; kill
+    mov r9, 0x2000176 ; no-op
+    xor r9, r8
+    mov rax, rdi
+    and rax, 0x01
+    mul r9
+    xor rax, r8
+
+    ; int kill(int pid, int signum, int posix);
+    mov rdx, rsi
+    mov rsi, 0x01
+    syscall
+
     ret
